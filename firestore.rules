@@ -1,0 +1,151 @@
+rules_version = '2';
+
+// Arji Tracker – MLA / MP portal security rules.
+//
+// Roles (stored in users/{uid}.role):
+//   superadmin – platform owner. Creates offices, can access every office.
+//                Can only be granted from the Firebase console (see README).
+//   admin      – MLA / MP. Full control of their own office.
+//   manager    – PA / office manager. All complaints of the office, assigns
+//                work, invites employees.
+//   employee   – staff. Registers complaints; sees / updates only complaints
+//                they created or that are assigned to them.
+//
+// Data isolation: every complaint lives under offices/{officeId}. Office
+// users can only reach their own office, so one MLA/MP office never sees
+// another's data.
+//
+// Public tracking: tracking/{TICKET_PHONE} holds only status information (no
+// names, no description). It can be fetched by exact id (ticket number +
+// phone number) but never listed or searched.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------- Helpers ----------------
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function userPath(id) { return /databases/$(database)/documents/users/$(id); }
+    function hasProfile() { return signedIn() && exists(userPath(uid())); }
+    function me() { return get(userPath(uid())).data; }
+
+    function isSuper() { return hasProfile() && me().role == 'superadmin'; }
+    function isMember(officeId) { return hasProfile() && me().officeId == officeId; }
+    function hasRole(officeId, roles) { return isMember(officeId) && me().role in roles; }
+    function isAdmin(officeId) { return isSuper() || hasRole(officeId, ['admin']); }
+    function isManager(officeId) { return isSuper() || hasRole(officeId, ['admin', 'manager']); }
+    function canEnter(officeId) { return isSuper() || isMember(officeId); }
+
+    // Who may invite which role into an office.
+    function canInvite(officeId, role) {
+      return (isSuper() && role in ['admin', 'manager', 'employee'])
+        || (hasRole(officeId, ['admin']) && role in ['manager', 'employee'])
+        || (hasRole(officeId, ['manager']) && role == 'employee');
+    }
+
+    // Can the caller see / work on this complaint?
+    function canSee(officeId, c) {
+      return isManager(officeId)
+        || (isMember(officeId) && (c.createdBy == uid() || c.assignedTo == uid()));
+    }
+
+    // ---------------- User profiles ----------------
+    match /users/{userId} {
+      allow read: if signedIn() && (
+        userId == uid()
+        || isSuper()
+        || (hasProfile() && resource.data.officeId == me().officeId)
+      );
+
+      // Joining an office: only with a matching invite (same office + role).
+      allow create: if signedIn()
+        && userId == uid()
+        && request.resource.data.email == myEmail()
+        && request.resource.data.role in ['admin', 'manager', 'employee']
+        && exists(/databases/$(database)/documents/invites/$(myEmail()))
+        && get(/databases/$(database)/documents/invites/$(myEmail())).data.officeId == request.resource.data.officeId
+        && get(/databases/$(database)/documents/invites/$(myEmail())).data.role == request.resource.data.role;
+
+      // Role changes: super admin any; office admin between manager/employee.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.role != 'superadmin'
+        && (
+          isSuper()
+          || (hasRole(resource.data.officeId, ['admin'])
+              && resource.data.role in ['manager', 'employee']
+              && request.resource.data.role in ['manager', 'employee'])
+        );
+
+      allow delete: if isSuper()
+        || (hasRole(resource.data.officeId, ['admin']) && resource.data.role in ['manager', 'employee']);
+    }
+
+    // ---------------- Invites ----------------
+    match /invites/{email} {
+      allow read: if signedIn() && (myEmail() == email || isSuper() || isManager(resource.data.officeId));
+      allow create: if email == email.lower()
+        && canInvite(request.resource.data.officeId, request.resource.data.role);
+      allow update: if canInvite(resource.data.officeId, resource.data.role)
+        && canInvite(request.resource.data.officeId, request.resource.data.role);
+      allow delete: if signedIn() && (myEmail() == email || canInvite(resource.data.officeId, resource.data.role));
+    }
+
+    // ---------------- Offices ----------------
+    match /offices/{officeId} {
+      allow get: if canEnter(officeId) || (isSuper() && resource == null);
+      allow list: if isSuper();
+      allow create: if isSuper() && officeId.matches('^[A-Z0-9]{2,8}$');
+      allow update: if isAdmin(officeId);
+      allow delete: if false;
+
+      // Ticket counter
+      match /meta/{docId} {
+        allow read, write: if canEnter(officeId);
+      }
+
+      // Complaints
+      match /complaints/{complaintId} {
+        allow read: if canSee(officeId, resource.data);
+
+        allow create: if canEnter(officeId)
+          && request.resource.data.createdBy == uid()
+          && request.resource.data.status == 'Pending'
+          && request.resource.data.citizenName is string
+          && request.resource.data.phone.matches('^[0-9]{10}$');
+
+        allow update: if request.resource.data.ticketNo == resource.data.ticketNo
+          && request.resource.data.phone == resource.data.phone
+          && request.resource.data.createdBy == resource.data.createdBy
+          && (
+            isManager(officeId)
+            // Employees can work on their own complaints but not re-assign them.
+            || (canSee(officeId, resource.data)
+                && request.resource.data.assignedTo == resource.data.assignedTo)
+          );
+
+        allow delete: if isAdmin(officeId);
+
+        // Audit trail: append-only, nobody can edit or delete it.
+        match /history/{entryId} {
+          allow read: if canSee(officeId,
+            get(/databases/$(database)/documents/offices/$(officeId)/complaints/$(complaintId)).data);
+          allow create: if request.resource.data.byUid == uid()
+            && canSee(officeId,
+              getAfter(/databases/$(database)/documents/offices/$(officeId)/complaints/$(complaintId)).data);
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    // ---------------- Public status tracking ----------------
+    match /tracking/{trackingId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if canEnter(request.resource.data.officeId);
+      allow update: if canEnter(resource.data.officeId)
+        && request.resource.data.officeId == resource.data.officeId;
+      allow delete: if isAdmin(resource.data.officeId);
+    }
+  }
+}
