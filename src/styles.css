@@ -232,3 +232,7 @@ a.stat:hover { text-decoration: none; border-color: var(--primary); }
   .card { border: 0; }
   .ack { border: 1px solid #000; }
 }
+
+.btn.google { background: #fff; border-color: #dadce0; color: #3c4043; gap: 10px; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.8rem; margin: 16px 0; }
+.divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
