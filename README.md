@@ -64,6 +64,14 @@ npm run deploy            # builds, then deploys hosting + firestore rules
 2. The MLA/MP opens the app, chooses **Create account** with that email, and joins as Admin.
 3. The Admin opens **Office** and invites Managers and Employees by email. Each invited person creates an account with that email and joins with the invited role.
 
+## Try the demo (no Firebase project needed)
+
+```bash
+npm run demo              # emulators + demo data + app on http://localhost:5173
+```
+
+Log in with any of these accounts (password `demo123`): `super@demo.com`, `admin@demo.com`, `manager@demo.com`, `employee@demo.com`. To try citizen tracking, open `/track` and enter ticket `MCH-00001` with mobile `9876543210`.
+
 ## Local development with emulators (no real Firebase project needed)
 
 ```bash

@@ -10,7 +10,8 @@
     "deploy": "npm run build && firebase deploy",
     "test:rules": "firebase emulators:exec --only firestore --project arji-rules-test \"node --test tests/rules.test.js\"",
     "emulators": "firebase emulators:start --only auth,firestore --project demo-arji",
-    "dev:emulators": "VITE_USE_EMULATORS=true vite"
+    "dev:emulators": "VITE_USE_EMULATORS=true vite",
+    "demo": "firebase emulators:exec --only auth,firestore --project demo-arji \"node scripts/seed-emulator.mjs && VITE_USE_EMULATORS=true vite --host\""
   },
   "dependencies": {
     "firebase": "^13.1.0",
