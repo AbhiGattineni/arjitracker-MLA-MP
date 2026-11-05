@@ -13,6 +13,7 @@ import ComplaintDetail from './pages/ComplaintDetail';
 import Office from './pages/Office';
 import SuperAdmin from './pages/SuperAdmin';
 import Track from './pages/Track';
+import Landing from './pages/Landing';
 
 function Loading() {
   return <div className="center-screen muted">Loading…</div>;
@@ -37,7 +38,7 @@ function Portal() {
   const { user, profile, role, office, loading } = useAuth();
   const { pathname } = useLocation();
   if (loading) return <Loading />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return pathname === '/' ? <Landing /> : <Navigate to="/login" replace />;
   if (!profile) return <Navigate to="/setup" replace />;
   if (!office) {
     if (role !== 'superadmin') return <OfficeMissing />;

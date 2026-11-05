@@ -125,6 +125,7 @@ export default function Login() {
         <p className="center small">
           Citizen? <Link to="/track">Track your complaint status →</Link>
         </p>
+        <p className="center small"><Link to="/">← Back to home</Link></p>
       </div>
     </div>
   );
